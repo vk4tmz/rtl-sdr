@@ -22,3 +22,18 @@ Source archive: `rtl-fm-927-filter-comparison.tar.gz` uploaded by user. Capture 
 ## Follow-up hardware observation: corrected upstream FIR9
 
 After removing `-o 4` and `-r 48000`, user listened to the isolated fork with `rtl_fm -f 92.7M -M fm -s 240k -F 9 -A fast -g 19.7 -p 44 -E deemp`, sent raw signed 16-bit mono to `aplay -r 240000`. **User reports “MixFM very clean.”** This is compelling qualitative evidence the existing upstream -F 9 path can solve the station-selectivity problem with appropriate configuration and may outperform the experimental `-E sharp` audio (some static). This is *not* yet a controlled matched capture or hardware-sample-rate confirmation of this run. The prior `-F 9 -o 4` invalid 3.84 MS/s finding stands, but must not be conflated with `-F 9` alone. Do not ship a new filtering algorithm until validated head-to-head against existing FIR9.
+
+
+## Hardware rate confirmed for corrected FIR9
+
+User supplied `/tmp/rtl-fm-927-fir9-valid.log` excerpt:
+
+```text
+Tuned to 93180000 Hz.
+Oversampling input by: 8x.
+Oversampling output by: 1x.
+Sampling at 1920000 S/s.
+Output at 240000 Hz.
+```
+
+No invalid-sample-rate or failed-set messages occurred in the filtered excerpt. This is consistent with valid 1.92 MS/s hardware acquisition and 8:1 decimation to nominal 240 kS/s mono PCM. Previous user listening reported very clean MIX FM. Actual PCM bytes per elapsed second and filter stopband attenuation are still to be measured. The earlier FIR9 + -o4 comparison was invalid and cannot be used to assess upstream FIR9.
