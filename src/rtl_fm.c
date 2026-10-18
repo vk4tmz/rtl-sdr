@@ -134,6 +134,9 @@ struct demod_state
 	int      squelch_level, conseq_squelch, squelch_hits, terminate_on_squelch;
 	int      downsample_passes;
 	int      comp_fir_size;
+	int      sharp_channel, sharp_phase, sharp_pos, sharp_step;
+	int16_t  sharp_i[81], sharp_q[81];
+	double   sharp_taps[81];
 	int      custom_atan;
 	int      deemph, deemph_a;
 	int      now_lpr;
@@ -322,6 +325,53 @@ void low_pass(struct demod_state *d)
 		i2 += 2;
 	}
 	d->lp_len = i2;
+}
+
+/* Experimental FIR before IQ downsampling; opt-in -E sharp.
+ * 81-tap Hamming windowed-sinc, stateful across async blocks.
+ * Evaluate filter only at output instants to keep CPU work bounded.
+ */
+#define SHARP_LEN 81
+static void sharp_prepare(struct demod_state *d)
+{
+	int k, mid = (SHARP_LEN - 1) / 2;
+	double norm = 0.0, fc = 95000.0 / dongle.rate;
+	for (k = 0; k < SHARP_LEN; ++k) {
+		int n = k - mid;
+		double v = n == 0 ? 2.0 * fc : sin(2.0 * M_PI * fc * n) / (M_PI * n);
+		v *= 0.54 - 0.46 * cos(2.0 * M_PI * k / (SHARP_LEN - 1));
+		d->sharp_taps[k] = v;
+		norm += v;
+	}
+	for (k = 0; k < SHARP_LEN; ++k) d->sharp_taps[k] /= norm;
+	d->sharp_step = d->downsample;
+	fprintf(stderr, "Experimental sharp FIR: %d taps, 95 kHz cutoff, %d:1 decimation, %u Hz input\n",
+		SHARP_LEN, d->sharp_step, dongle.rate);
+}
+static void low_pass_sharp(struct demod_state *d)
+{
+	int i, k, j, o = 0, pos = d->sharp_pos, phase = d->sharp_phase;
+	for (i = 0; i + 1 < d->lp_len; i += 2) {
+		d->sharp_i[pos] = d->lowpassed[i];
+		d->sharp_q[pos] = d->lowpassed[i + 1];
+		pos = (pos + 1) % SHARP_LEN;
+		if (++phase != d->sharp_step) continue;
+		phase = 0;
+		{
+			double re = 0, im = 0;
+			j = pos;
+			for (k = 0; k < SHARP_LEN; ++k) {
+				j = j == 0 ? SHARP_LEN - 1 : j - 1;
+				re += d->sharp_taps[k] * d->sharp_i[j];
+				im += d->sharp_taps[k] * d->sharp_q[j];
+			}
+			d->lowpassed[o++] = (int16_t)lrint(fmax(-32768., fmin(32767., re)));
+			d->lowpassed[o++] = (int16_t)lrint(fmax(-32768., fmin(32767., im)));
+		}
+	}
+	d->sharp_pos = pos;
+	d->sharp_phase = phase;
+	d->lp_len = o;
 }
 
 int low_pass_simple(int16_t *signal2, int len, int step)
@@ -735,7 +785,9 @@ void full_demod(struct demod_state *d)
 	int i, ds_p;
 	int sr = 0;
 	ds_p = d->downsample_passes;
-	if (ds_p) {
+	if (d->sharp_channel) {
+		low_pass_sharp(d);
+	} else if (ds_p) {
 		for (i=0; i < ds_p; i++) {
 			fifth_order(d->lowpassed,   (d->lp_len >> i), d->lp_i_hist[i]);
 			fifth_order(d->lowpassed+1, (d->lp_len >> i) - 1, d->lp_q_hist[i]);
@@ -897,6 +949,7 @@ static void *controller_thread_fn(void *arg)
 
 	/* set up primary channel */
 	optimal_settings(s->freqs[0], demod.rate_in);
+	if (demod.sharp_channel) sharp_prepare(&demod);
 	if (dongle.direct_sampling) {
 		verbose_direct_sampling(dongle.dev, dongle.direct_sampling);}
 	if (dongle.offset_tuning) {
@@ -1129,6 +1182,8 @@ int main(int argc, char **argv)
 				dongle.direct_sampling = 2;}
 			if (strcmp("offset",  optarg) == 0) {
 				dongle.offset_tuning = 1;}
+			if (strcmp("sharp", optarg) == 0) {
+				demod.sharp_channel = 1;}
 			break;
 		case 'F':
 			demod.downsample_passes = 1;  /* truthy placeholder */
