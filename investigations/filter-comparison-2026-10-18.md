@@ -37,3 +37,8 @@ Output at 240000 Hz.
 ```
 
 No invalid-sample-rate or failed-set messages occurred in the filtered excerpt. This is consistent with valid 1.92 MS/s hardware acquisition and 8:1 decimation to nominal 240 kS/s mono PCM. Previous user listening reported very clean MIX FM. Actual PCM bytes per elapsed second and filter stopband attenuation are still to be measured. The earlier FIR9 + -o4 comparison was invalid and cannot be used to assess upstream FIR9.
+
+
+## REBEL905 weak-station FIR9 live listening check
+
+User compared 90.5 MHz REBEL905 with isolated Osmocom fork, `-F 9 -s 240k -A fast -p 44 -E deemp`, 240 kHz mono S16 playback, changing only NooElec tuner gain. At **19.7 dB**, music was very weak and barely audible. At **36.4 dB**, user reported **clean, good-quality music**. This aligns with independent earlier NooElec RDS gain sweep peaking near 36.4–37.2 dB, but audio intelligibility is a different performance metric. This is a positive weak-station validation of the upstream FIR9 path. Triple M and SBS have so far only been live-checked with the experimental `-E sharp` path, not FIR9.
